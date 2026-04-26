@@ -1,90 +1,154 @@
-const TelegramBot = require('node-telegram-bot-api');
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, F, Router, types
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '8781741638:AAHk6rBlW7r3k3zD7U0QdyissyKD6YDBYII';
-const ADMIN_ID = 1444520038;
+logging.basicConfig(level=logging.INFO)
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+BOT_TOKEN = "8781741638:AAHk6rBlW7r3k3zD7U0QdyissyKD6YDBYII"
+ADMIN_ID = 1444520038
 
-console.log('🤖 Бот с админкой запущен');
+router = Router()
 
-// ===================== АДМИН-ПАНЕЛЬ =====================
-const adminKeyboard = {
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: '👤 Пользователи', callback_data: 'admin_users' }],
-      [{ text: '📈 Цены', callback_data: 'admin_prices' }],
-      [{ text: '🎟️ Промокоды', callback_data: 'admin_promos' }],
-      [{ text: '📢 Рассылка', callback_data: 'admin_broadcast' }],
-      [{ text: '⚙️ Настройки', callback_data: 'admin_settings' }],
-      [{ text: '📊 Статистика', callback_data: 'admin_stats' }]
-    ]
-  }
-};
+def admin_only(func):
+    async def wrapper(msg_or_call, *args, **kwargs):
+        if msg_or_call.from_user.id != ADMIN_ID:
+            if hasattr(msg_or_call, "answer"):
+                await msg_or_call.answer("⛔ Доступ запрещён.", show_alert=True)
+            else:
+                await msg_or_call.reply("⛔ Доступ запрещён.")
+            return
+        return await func(msg_or_call, *args, **kwargs)
+    return wrapper
 
-// /start — только для админа
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
+# Список пользователей (заглушка — потом заменим на Supabase)
+USERS = [
+    {"telegram_id": 1444520038, "username": "vavavbabano"},
+    {"telegram_id": 123456789, "username": "testuser1"},
+]
 
-  if (msg.from.id === ADMIN_ID) {
-    bot.sendMessage(chatId, '🔐 *Админ-панель*', { parse_mode: 'Markdown', ...adminKeyboard });
-  } else {
-    bot.sendMessage(chatId, '👋 Добро пожаловать! Используйте /help для связи.');
-  }
-});
+# ===================== ГЛАВНОЕ МЕНЮ =====================
+@router.message(F.text == "/start")
+@admin_only
+async def main_menu(message: types.Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Поиск пользователя", callback_data="user_search")],
+        [InlineKeyboardButton(text="📋 Все пользователи", callback_data="user_list")],
+        [InlineKeyboardButton(text="🚫 Заблокированные", callback_data="user_blocked")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="broadcast_menu")],
+    ])
+    await message.answer("👤 Управление пользователями\n\nВыберите действие:", reply_markup=kb)
 
-// /help
-bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Опишите проблему, и администратор свяжется с вами.');
-});
+# ===================== РАССЫЛКА =====================
+@router.message(F.text == "/broadcast")
+@admin_only
+async def broadcast_instant(message: types.Message, bot: Bot):
+    """Мгновенная рассылка фиксированного сообщения"""
+    text = "ярик дурак, вадик повелитель всего, легенда"
+    success, fail = 0, 0
+    
+    msg = await message.answer(f"📢 Начинаю рассылку...\nПользователей: {len(USERS)}")
+    
+    for user in USERS:
+        try:
+            await bot.send_message(user["telegram_id"], text)
+            success += 1
+        except Exception:
+            fail += 1
+        await asyncio.sleep(0.05)
+    
+    await msg.edit_text(
+        f"📢 Рассылка завершена!\n\n"
+        f"✅ Успешно: {success}\n"
+        f"❌ Ошибок: {fail}\n\n"
+        f"Сообщение: {text}"
+    )
 
-// Обработка кнопок админки
-bot.on('callback_query', (query) => {
-  const chatId = query.message.chat.id;
-  const data = query.data;
+@router.callback_query(F.data == "broadcast_menu")
+@admin_only
+async def broadcast_menu(call: types.CallbackQuery):
+    await call.message.edit_text(
+        "📢 Рассылка\n\n"
+        "Используйте команду /broadcast для мгновенной рассылки сообщения всем пользователям.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+        ])
+    )
 
-  if (query.from.id !== ADMIN_ID) {
-    bot.answerCallbackQuery(query.id, { text: '⛔ Доступ запрещён.', show_alert: true });
-    return;
-  }
+# ===================== ПОИСК ПОЛЬЗОВАТЕЛЯ =====================
+@router.callback_query(F.data == "user_search")
+@admin_only
+async def user_search_start(call: types.CallbackQuery, state: FSMContext):
+    await call.message.edit_text(
+        "🔍 Введите username (с @) или ID пользователя:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+        ])
+    )
+    await state.set_state("waiting_for_user_search")
 
-  switch (data) {
-    case 'admin_users':
-      bot.sendMessage(chatId, '👤 *Пользователи*\n\nВ разработке. Здесь будет список пользователей и управление ими.', { parse_mode: 'Markdown' });
-      break;
-    case 'admin_prices':
-      bot.sendMessage(chatId, '📈 *Цены*\n\nТекущий курс: 1⭐ = 1.64₽ (СБП) / 0.015 TON', { parse_mode: 'Markdown' });
-      break;
-    case 'admin_promos':
-      bot.sendMessage(chatId, '🎟️ *Промокоды*\n\nВ разработке. Здесь будет создание и управление промокодами.', { parse_mode: 'Markdown' });
-      break;
-    case 'admin_broadcast':
-      bot.sendMessage(chatId, '📢 *Рассылка*\n\nОтправьте сообщение для рассылки всем пользователям.', { parse_mode: 'Markdown' });
-      break;
-    case 'admin_settings':
-      bot.sendMessage(chatId, '⚙️ *Настройки*\n\nВ разработке. Здесь будут настройки бота.', { parse_mode: 'Markdown' });
-      break;
-    case 'admin_stats':
-      bot.sendMessage(chatId, '📊 *Статистика*\n\nЗаказов сегодня: 0\nЗвёзд продано: 0\nДоход: 0₽', { parse_mode: 'Markdown' });
-      break;
-  }
+@router.message(F.text, state="waiting_for_user_search")
+@admin_only
+async def user_search_result(message: types.Message, state: FSMContext):
+    query = message.text.strip().lstrip("@")
+    await state.clear()
+    
+    found = None
+    for u in USERS:
+        if str(u["telegram_id"]) == query or u.get("username") == query:
+            found = u
+            break
+    
+    if found:
+        text = f"✅ Найден: @{found['username']} (ID: {found['telegram_id']})"
+    else:
+        text = f"🔍 По запросу <code>{query}</code> ничего не найдено."
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Искать ещё", callback_data="user_search")],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="main_menu")],
+    ]))
 
-  bot.answerCallbackQuery(query.id);
-});
+# ===================== СПИСОК ПОЛЬЗОВАТЕЛЕЙ =====================
+@router.callback_query(F.data == "user_list")
+@admin_only
+async def user_list(call: types.CallbackQuery):
+    text = "📋 Список пользователей:\n\n"
+    for u in USERS:
+        text += f"• @{u['username']} (ID: {u['telegram_id']})\n"
+    
+    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+    ]))
 
-// Обработка обычных сообщений (для рассылки и ответов)
-bot.on('message', (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-  const userId = msg.from.id;
+# ===================== ЗАБЛОКИРОВАННЫЕ =====================
+@router.callback_query(F.data == "user_blocked")
+@admin_only
+async def user_blocked(call: types.CallbackQuery):
+    await call.message.edit_text("🚫 Список заблокированных пуст.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+    ]))
 
-  // Игнорируем команды
-  if (!text || text.startsWith('/')) return;
+# ===================== НАЗАД В МЕНЮ =====================
+@router.callback_query(F.data == "main_menu")
+@admin_only
+async def back_to_menu(call: types.CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Поиск пользователя", callback_data="user_search")],
+        [InlineKeyboardButton(text="📋 Все пользователи", callback_data="user_list")],
+        [InlineKeyboardButton(text="🚫 Заблокированные", callback_data="user_blocked")],
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="broadcast_menu")],
+    ])
+    await call.message.edit_text("👤 Управление пользователями\n\nВыберите действие:", reply_markup=kb)
 
-  // Если админ — игнорируем (админка через кнопки)
-  if (userId === ADMIN_ID) return;
+# ===================== ЗАПУСК =====================
+async def main():
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
+    await dp.start_polling(bot)
 
-  // Обычный пользователь — пересылаем админу
-  const from = msg.from.username ? `@${msg.from.username}` : userId;
-  bot.sendMessage(ADMIN_ID, `📩 Сообщение от ${from} (${userId}):\n\n${text}`);
-  bot.sendMessage(chatId, '✅ Ваше сообщение отправлено. Мы ответим в ближайшее время.');
-});
+if __name__ == "__main__":
+    asyncio.run(main())
