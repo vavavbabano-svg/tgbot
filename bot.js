@@ -1,154 +1,170 @@
-import asyncio
-import logging
-from aiogram import Bot, Dispatcher, F, Router, types
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+const TelegramBot = require('node-telegram-bot-api');
 
-logging.basicConfig(level=logging.INFO)
+const BOT_TOKEN = process.env.BOT_TOKEN || '8781741638:AAHk6rBlW7r3k3zD7U0QdyissyKD6YDBYII';
+const ADMIN_ID = 1444520038;
 
-BOT_TOKEN = "8781741638:AAHk6rBlW7r3k3zD7U0QdyissyKD6YDBYII"
-ADMIN_ID = 1444520038
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-router = Router()
+console.log('🤖 Бот с админкой запущен');
 
-def admin_only(func):
-    async def wrapper(msg_or_call, *args, **kwargs):
-        if msg_or_call.from_user.id != ADMIN_ID:
-            if hasattr(msg_or_call, "answer"):
-                await msg_or_call.answer("⛔ Доступ запрещён.", show_alert=True)
-            else:
-                await msg_or_call.reply("⛔ Доступ запрещён.")
-            return
-        return await func(msg_or_call, *args, **kwargs)
-    return wrapper
+// Список пользователей (заглушка — потом заменим на Supabase)
+const USERS = [
+    { telegram_id: 1444520038, username: 'vavavbabano' },
+    { telegram_id: 123456789, username: 'testuser1' },
+];
 
-# Список пользователей (заглушка — потом заменим на Supabase)
-USERS = [
-    {"telegram_id": 1444520038, "username": "vavavbabano"},
-    {"telegram_id": 123456789, "username": "testuser1"},
-]
+// Проверка на админа
+function isAdmin(userId) {
+    return userId === ADMIN_ID;
+}
 
-# ===================== ГЛАВНОЕ МЕНЮ =====================
-@router.message(F.text == "/start")
-@admin_only
-async def main_menu(message: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 Поиск пользователя", callback_data="user_search")],
-        [InlineKeyboardButton(text="📋 Все пользователи", callback_data="user_list")],
-        [InlineKeyboardButton(text="🚫 Заблокированные", callback_data="user_blocked")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="broadcast_menu")],
-    ])
-    await message.answer("👤 Управление пользователями\n\nВыберите действие:", reply_markup=kb)
+// Главное меню
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
 
-# ===================== РАССЫЛКА =====================
-@router.message(F.text == "/broadcast")
-@admin_only
-async def broadcast_instant(message: types.Message, bot: Bot):
-    """Мгновенная рассылка фиксированного сообщения"""
-    text = "ярик дурак, вадик повелитель всего, легенда"
-    success, fail = 0, 0
-    
-    msg = await message.answer(f"📢 Начинаю рассылку...\nПользователей: {len(USERS)}")
-    
-    for user in USERS:
-        try:
-            await bot.send_message(user["telegram_id"], text)
-            success += 1
-        except Exception:
-            fail += 1
-        await asyncio.sleep(0.05)
-    
-    await msg.edit_text(
-        f"📢 Рассылка завершена!\n\n"
-        f"✅ Успешно: {success}\n"
-        f"❌ Ошибок: {fail}\n\n"
-        f"Сообщение: {text}"
-    )
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '⛔ Доступ запрещён.');
+    }
 
-@router.callback_query(F.data == "broadcast_menu")
-@admin_only
-async def broadcast_menu(call: types.CallbackQuery):
-    await call.message.edit_text(
-        "📢 Рассылка\n\n"
-        "Используйте команду /broadcast для мгновенной рассылки сообщения всем пользователям.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
-        ])
-    )
+    bot.sendMessage(chatId, '👤 Управление пользователями\n\nВыберите действие:', {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '👤 Поиск пользователя', callback_data: 'user_search' }],
+                [{ text: '📋 Все пользователи', callback_data: 'user_list' }],
+                [{ text: '🚫 Заблокированные', callback_data: 'user_blocked' }],
+                [{ text: '📢 Рассылка', callback_data: 'broadcast_menu' }],
+            ]
+        }
+    });
+});
 
-# ===================== ПОИСК ПОЛЬЗОВАТЕЛЯ =====================
-@router.callback_query(F.data == "user_search")
-@admin_only
-async def user_search_start(call: types.CallbackQuery, state: FSMContext):
-    await call.message.edit_text(
-        "🔍 Введите username (с @) или ID пользователя:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
-        ])
-    )
-    await state.set_state("waiting_for_user_search")
+// Мгновенная рассылка
+bot.onText(/\/broadcast/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
 
-@router.message(F.text, state="waiting_for_user_search")
-@admin_only
-async def user_search_result(message: types.Message, state: FSMContext):
-    query = message.text.strip().lstrip("@")
-    await state.clear()
-    
-    found = None
-    for u in USERS:
-        if str(u["telegram_id"]) == query or u.get("username") == query:
-            found = u
-            break
-    
-    if found:
-        text = f"✅ Найден: @{found['username']} (ID: {found['telegram_id']})"
-    else:
-        text = f"🔍 По запросу <code>{query}</code> ничего не найдено."
-    
-    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Искать ещё", callback_data="user_search")],
-        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="main_menu")],
-    ]))
+    if (!isAdmin(userId)) return;
 
-# ===================== СПИСОК ПОЛЬЗОВАТЕЛЕЙ =====================
-@router.callback_query(F.data == "user_list")
-@admin_only
-async def user_list(call: types.CallbackQuery):
-    text = "📋 Список пользователей:\n\n"
-    for u in USERS:
-        text += f"• @{u['username']} (ID: {u['telegram_id']})\n"
-    
-    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
-    ]))
+    const text = 'ярик дурак, вадик повелитель всего, легенда';
+    let success = 0, fail = 0;
 
-# ===================== ЗАБЛОКИРОВАННЫЕ =====================
-@router.callback_query(F.data == "user_blocked")
-@admin_only
-async def user_blocked(call: types.CallbackQuery):
-    await call.message.edit_text("🚫 Список заблокированных пуст.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
-    ]))
+    const statusMsg = await bot.sendMessage(chatId, `📢 Начинаю рассылку...\nПользователей: ${USERS.length}`);
 
-# ===================== НАЗАД В МЕНЮ =====================
-@router.callback_query(F.data == "main_menu")
-@admin_only
-async def back_to_menu(call: types.CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 Поиск пользователя", callback_data="user_search")],
-        [InlineKeyboardButton(text="📋 Все пользователи", callback_data="user_list")],
-        [InlineKeyboardButton(text="🚫 Заблокированные", callback_data="user_blocked")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="broadcast_menu")],
-    ])
-    await call.message.edit_text("👤 Управление пользователями\n\nВыберите действие:", reply_markup=kb)
+    for (const user of USERS) {
+        try {
+            await bot.sendMessage(user.telegram_id, text);
+            success++;
+        } catch (e) {
+            fail++;
+        }
+        await new Promise(r => setTimeout(r, 50));
+    }
 
-# ===================== ЗАПУСК =====================
-async def main():
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
-    await dp.start_polling(bot)
+    await bot.editMessageText(
+        `📢 Рассылка завершена!\n\n✅ Успешно: ${success}\n❌ Ошибок: ${fail}\n\nСообщение: ${text}`,
+        { chat_id: chatId, message_id: statusMsg.message_id }
+    );
+});
 
-if __name__ == "__main__":
-    asyncio.run(main())
+// Обработка callback'ов
+bot.on('callback_query', (query) => {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+
+    if (!isAdmin(userId)) {
+        return bot.answerCallbackQuery(query.id, { text: '⛔ Доступ запрещён.', show_alert: true });
+    }
+
+    const action = query.data;
+
+    if (action === 'user_list') {
+        let text = '📋 Список пользователей:\n\n';
+        USERS.forEach(u => text += `• @${u.username} (ID: ${u.telegram_id})\n`);
+        
+        bot.editMessageText(text, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: {
+                inline_keyboard: [[{ text: '⬅️ Назад', callback_data: 'main_menu' }]]
+            }
+        });
+    }
+
+    else if (action === 'user_search') {
+        bot.editMessageText('🔍 Введите username (с @) или ID пользователя:', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: {
+                inline_keyboard: [[{ text: '⬅️ Назад', callback_data: 'main_menu' }]]
+            }
+        });
+
+        // Ждём ответ от админа
+        bot.once('message', (msg) => {
+            if (msg.from.id !== ADMIN_ID) return;
+            
+            const query_text = msg.text.trim().replace('@', '');
+            const found = USERS.find(u => 
+                String(u.telegram_id) === query_text || u.username === query_text
+            );
+
+            if (found) {
+                bot.sendMessage(chatId, `✅ Найден: @${found.username} (ID: ${found.telegram_id})`, {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🔍 Искать ещё', callback_data: 'user_search' }],
+                            [{ text: '⬅️ Главное меню', callback_data: 'main_menu' }],
+                        ]
+                    }
+                });
+            } else {
+                bot.sendMessage(chatId, `🔍 По запросу ${query_text} ничего не найдено.`, {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🔍 Искать ещё', callback_data: 'user_search' }],
+                            [{ text: '⬅️ Главное меню', callback_data: 'main_menu' }],
+                        ]
+                    }
+                });
+            }
+        });
+    }
+
+    else if (action === 'user_blocked') {
+        bot.editMessageText('🚫 Список заблокированных пуст.', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: {
+                inline_keyboard: [[{ text: '⬅️ Назад', callback_data: 'main_menu' }]]
+            }
+        });
+    }
+
+    else if (action === 'broadcast_menu') {
+        bot.editMessageText('📢 Рассылка\n\nИспользуйте команду /broadcast для мгновенной рассылки сообщения всем пользователям.', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: {
+                inline_keyboard: [[{ text: '⬅️ Назад', callback_data: 'main_menu' }]]
+            }
+        });
+    }
+
+    else if (action === 'main_menu') {
+        bot.editMessageText('👤 Управление пользователями\n\nВыберите действие:', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '👤 Поиск пользователя', callback_data: 'user_search' }],
+                    [{ text: '📋 Все пользователи', callback_data: 'user_list' }],
+                    [{ text: '🚫 Заблокированные', callback_data: 'user_blocked' }],
+                    [{ text: '📢 Рассылка', callback_data: 'broadcast_menu' }],
+                ]
+            }
+        });
+    }
+
+    bot.answerCallbackQuery(query.id);
+});
